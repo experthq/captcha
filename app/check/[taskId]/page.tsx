@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, use } from "react";
-import { Eye, RefreshCw, ArrowLeft, MessageSquareCheck } from "lucide-react";
+import { useState, useEffect, useCallback, useRef, use } from "react";
+import { Eye, RefreshCw, ArrowLeft, MessageSquareCheck, ThumbsUp } from "lucide-react";
+import confetti from "canvas-confetti";
 import Link from "next/link";
 
 const API_BASE = process.env.NEXT_PUBLIC_BASE_URL ?? "";
@@ -30,6 +31,7 @@ export default function CheckPage({
   const [error, setError] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
   const [lastChecked, setLastChecked] = useState<string | null>(null);
+  const hasConfettied = useRef(false);
 
   const fetchProofs = useCallback(async () => {
     setLoading(true);
@@ -69,6 +71,18 @@ export default function CheckPage({
     return () => clearInterval(timer);
   }, [cooldown]);
 
+  // Fire confetti when a result appears
+  useEffect(() => {
+    const hasResult = submissions.some((s) => {
+      const def = definitions.find((d) => d.id === s.definitionId);
+      return def?.type === "inputText";
+    });
+    if (hasResult && !hasConfettied.current) {
+      hasConfettied.current = true;
+      confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 } });
+    }
+  }, [submissions, definitions]);
+
   // Find the showImage definition and inputText submission
   const imageDef = definitions.find((d) => d.type === "showImage");
   const imageSrc = imageDef?.image || imageDef?.value;
@@ -107,6 +121,8 @@ export default function CheckPage({
             </a>{" "}
           </p>
         </div>
+
+        
 
         {definitions.length > 0 && (
           <div className="flex flex-col gap-0">
@@ -150,7 +166,7 @@ export default function CheckPage({
 
         {/* Image + Result side by side */}
         {(imageSrc || textSubmission) && (
-          <div className="flex flex-col sm:flex-row gap-6 w-full">
+          <div className="flex flex-col gap-6 w-full">
             {imageSrc && (
               <div className="flex flex-col gap-2">
                 <p className="text-xs font-medium text-zinc-500 uppercase">Image</p>
@@ -163,10 +179,10 @@ export default function CheckPage({
               </div>
             )}
             {textSubmission && (
-              <div className="flex flex-col gap-2">
-                <p className="text-xs font-medium text-zinc-500 uppercase">Result</p>
+              <div className="flex flex-col gap-2 w-full sm:w-1/2">
+                <p className="text-xs font-medium text-zinc-500 uppercase">Captcha Text</p>
                 <div className="rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950">
-                  <p className="text-2xl font-bold text-green-700 dark:text-green-300">
+                  <p className="flex flex-row items-center gap-2 text-2xl font-bold text-green-700 dark:text-green-300">
                     {textSubmission.value}
                   </p>
                 </div>
