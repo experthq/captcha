@@ -62,6 +62,21 @@ export default function CheckPage({
     fetchProofs();
   }, [fetchProofs]);
 
+  // Auto-poll every 10 seconds, max 6 times, then stop
+  const hasResult = submissions.some((s) => {
+    const def = definitions.find((d) => d.id === s.definitionId);
+    return def?.type === "inputText";
+  });
+  const [pollCount, setPollCount] = useState(0);
+  useEffect(() => {
+    if (hasResult || pollCount >= 6) return;
+    const interval = setInterval(() => {
+      setPollCount((c) => c + 1);
+      fetchProofs();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [fetchProofs, hasResult, pollCount]);
+
   // Cooldown timer
   useEffect(() => {
     if (cooldown <= 0) return;

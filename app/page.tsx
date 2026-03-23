@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, Eye, MessageSquareCheck } from "lucide-react";
+import { Upload, Eye, MessageSquareCheck, X } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_BASE_URL ?? "";
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? "";
@@ -35,6 +35,34 @@ function compressImage(file: File, maxWidth = 300, quality = 0.6): Promise<strin
   });
 }
 
+function compressImageFromUrl(url: string, maxWidth = 300, quality = 0.6): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const scale = Math.min(1, maxWidth / img.width);
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("Canvas not supported"));
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+const EXAMPLES = [
+  "/captcha01.jpg",
+  "/captcha02.jpg",
+  "/captcha03.jpg",
+  "/captcha04.jpg",
+  "/captcha05.jpg",
+  "/captcha06.jpg",
+];
+
 interface ProofDefinition {
   id: string;
   type?: string;
@@ -54,7 +82,22 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showExamples, setShowExamples] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleExampleSelect = async (url: string) => {
+    setShowExamples(false);
+    setLoading(true);
+    setError(null);
+    try {
+      const base64 = await compressImageFromUrl(url);
+      setPreview(base64);
+    } catch {
+      setError("Failed to load example image");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -183,26 +226,84 @@ export default function Home() {
             onChange={handleFileChange}
           />
 
-          
-            <button
-              className={`flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] ${preview ? "bg-zinc-100 dark:bg-zinc-900 text-zinc-500 hover:text-zinc-200 dark:hover:text-zinc-100" : ""}`}
-              onClick={() => inputRef.current?.click()}
-              disabled={loading || submitting}
-            >
-              <Upload className="w-7 h-7" />
-              {loading ? "Processing..." : preview ? "" : "Upload Image"}
-            </button>
+          {!preview && (
+            <>
+              <button
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc]"
+                onClick={() => inputRef.current?.click()}
+                disabled={loading}
+              >
+                <Upload className="w-7 h-7" />
+                {loading ? "Processing..." : "Upload"}
+              </button>
+
+              <button
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-full border border-zinc-300 px-5 text-foreground transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                onClick={() => setShowExamples(true)}
+                disabled={loading}
+              >
+                Examples
+              </button>
+            </>
+          )}
 
           {preview && (
-            <button
-              className={`flex h-12 w-full items-center justify-center gap-2 rounded-full border border-zinc-300 bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc]`}
-              onClick={handleSubmit}
-              disabled={submitting}
-            >
-              {submitting ? "Submitting..." : "Submit"}
-            </button>
+            <>
+              <button
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-full border border-zinc-300 px-5 text-foreground transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                onClick={() => setPreview(null)}
+                disabled={submitting}
+              >
+                Back
+              </button>
+              <button
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc]"
+                onClick={handleSubmit}
+                disabled={submitting}
+              >
+                {submitting ? "Submitting..." : "Submit"}
+              </button>
+            </>
           )}
         </div>
+
+        {showExamples && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+            onClick={() => setShowExamples(false)}
+          >
+            <div
+              className="relative mx-4 w-full max-w-lg rounded-2xl bg-white p-6 dark:bg-zinc-900"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                className="absolute right-4 top-4 text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
+                onClick={() => setShowExamples(false)}
+              >
+                <X className="h-5 w-5" />
+              </button>
+              <h2 className="mb-4 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                Choose an example
+              </h2>
+              <div className="grid grid-cols-3 gap-3">
+                {EXAMPLES.map((src) => (
+                  <button
+                    key={src}
+                    className="overflow-hidden rounded-lg border border-zinc-200 transition-all hover:border-zinc-400 hover:shadow-md dark:border-zinc-700 dark:hover:border-zinc-500"
+                    onClick={() => handleExampleSelect(src)}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={src}
+                      alt={src}
+                      className="h-auto w-full object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
