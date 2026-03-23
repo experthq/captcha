@@ -1,0 +1,368 @@
+{
+  "name": "Captcha Solver",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "captcha-solve",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "captcha-solve"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.API_BASE }}/v1/campaigns/{{ $vars.CAMPAIGN_ID }}/template",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $vars.API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-template",
+      "name": "Get Campaign Template",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const template = $input.first().json;\nconst imageBase64 = $('Webhook').first().json.body.imageBase64;\n\nconst proofDefs = template.proofDefinitions || [];\nconst showImageProof = proofDefs.find(p => p.type === 'showImage');\n\nif (!showImageProof) {\n  throw new Error('No showImage proof definition found in campaign template');\n}\n\nreturn [{\n  json: {\n    proofId: showImageProof.id,\n    imageBase64: imageBase64\n  }\n}];"
+      },
+      "id": "extract-proof-id",
+      "name": "Extract Proof ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.API_BASE }}/v1/campaigns/{{ $vars.CAMPAIGN_ID }}/generate-tasks",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $vars.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tasks: [{ proofs: { [$input.first().json.proofId]: { value: $input.first().json.imageBase64 } } }] }) }}",
+        "options": {}
+      },
+      "id": "generate-task",
+      "name": "Generate Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const genResult = $input.first().json;\nconst taskId = genResult.tasks[0].id;\n\nreturn [{\n  json: {\n    taskId: taskId,\n    retryCount: 0\n  }\n}];"
+      },
+      "id": "extract-task-id",
+      "name": "Extract Task ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "amount": 15,
+        "unit": "seconds"
+      },
+      "id": "wait",
+      "name": "Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.API_BASE }}/v1/tasks/{{ $json.taskId }}/proofs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $vars.API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "check-proofs",
+      "name": "Check Proofs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1520, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const proofs = $input.first().json;\nconst taskId = $('Wait').first().json.taskId;\nconst retryCount = $('Wait').first().json.retryCount;\n\nconst definitions = proofs.definitions || [];\nconst submissions = proofs.submissions || [];\n\n// Find the inputText definition\nconst inputTextDef = definitions.find(d => d.type === 'inputText');\n\nlet captchaText = null;\n\nif (inputTextDef) {\n  // Find a submission matching the inputText definition\n  const submission = submissions.find(s => s.definitionId === inputTextDef.id);\n  if (submission && submission.value) {\n    captchaText = submission.value;\n  }\n}\n\nreturn [{\n  json: {\n    taskId: taskId,\n    retryCount: retryCount,\n    captchaText: captchaText,\n    hasResult: captchaText !== null\n  }\n}];"
+      },
+      "id": "parse-result",
+      "name": "Parse Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1740, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-result",
+              "leftValue": "={{ $json.hasResult }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-result",
+      "name": "Has Result?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1960, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, taskId: $json.taskId, captchaText: $json.captchaText }) }}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2200, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const taskId = $input.first().json.taskId;\nconst retryCount = $input.first().json.retryCount + 1;\n\nif (retryCount >= 6) {\n  return [{\n    json: {\n      taskId: taskId,\n      retryCount: retryCount,\n      timedOut: true\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    taskId: taskId,\n    retryCount: retryCount,\n    timedOut: false\n  }\n}];"
+      },
+      "id": "retry-counter",
+      "name": "Retry Counter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, 420]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "timed-out",
+              "leftValue": "={{ $json.timedOut }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-timed-out",
+      "name": "Timed Out?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2420, 420]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, taskId: $json.taskId, error: 'Timed out waiting for captcha result after 6 retries (90 seconds)' }) }}",
+        "options": {
+          "responseCode": 408
+        }
+      },
+      "id": "respond-timeout",
+      "name": "Respond Timeout",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2660, 340]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Campaign Template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Campaign Template": {
+      "main": [
+        [
+          {
+            "node": "Extract Proof ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Proof ID": {
+      "main": [
+        [
+          {
+            "node": "Generate Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Task": {
+      "main": [
+        [
+          {
+            "node": "Extract Task ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Task ID": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Check Proofs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Proofs": {
+      "main": [
+        [
+          {
+            "node": "Parse Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Result": {
+      "main": [
+        [
+          {
+            "node": "Has Result?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Result?": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retry Counter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry Counter": {
+      "main": [
+        [
+          {
+            "node": "Timed Out?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Timed Out?": {
+      "main": [
+        [
+          {
+            "node": "Respond Timeout",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "pinData": {}
+}
