@@ -1,0 +1,571 @@
+{
+  "name": "Captcha Solver Chatbot",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {
+          "allowedFilesMimeTypes": "image/*",
+          "allowFileUploads": true
+        }
+      },
+      "id": "chat-trigger",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 400],
+      "webhookId": "captcha-chat"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst binaryKeys = Object.keys(item.binary || {});\nconst hasImage = binaryKeys.length > 0;\n\nreturn [{\n  json: {\n    hasImage: hasImage,\n    chatInput: item.json.chatInput || ''\n  }\n}];"
+      },
+      "id": "route-input",
+      "name": "Route Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-image",
+              "leftValue": "={{ $json.hasImage }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-image",
+      "name": "Has Image?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [640, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $('Chat Trigger').all();\nconst item = items[0];\n\nconst binaryKeys = Object.keys(item.binary || {});\nconst binaryData = item.binary[binaryKeys[0]];\nconst mimeType = binaryData.mimeType || 'image/png';\n\nconst buffer = await this.helpers.getBinaryDataBuffer(0, binaryKeys[0]);\nconst base64 = buffer.toString('base64');\n\nreturn [{\n  json: {\n    imageBase64: `data:${mimeType};base64,${base64}`\n  }\n}];"
+      },
+      "id": "convert-to-base64",
+      "name": "Convert Image to Base64",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.API_BASE }}/v1/campaigns/{{ $vars.CAMPAIGN_ID }}/template",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $vars.API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-template",
+      "name": "Get Campaign Template",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const template = $input.first().json;\nconst imageBase64 = $('Convert Image to Base64').first().json.imageBase64;\n\nconst proofDefs = template.proofDefinitions || [];\nconst showImageProof = proofDefs.find(p => p.type === 'showImage');\n\nif (!showImageProof) {\n  throw new Error('No showImage proof definition found in campaign template');\n}\n\nreturn [{\n  json: {\n    proofId: showImageProof.id,\n    imageBase64: imageBase64\n  }\n}];"
+      },
+      "id": "extract-proof-id",
+      "name": "Extract Proof ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.API_BASE }}/v1/campaigns/{{ $vars.CAMPAIGN_ID }}/generate-tasks",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $vars.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tasks: [{ proofs: { [$input.first().json.proofId]: { value: $input.first().json.imageBase64 } } }] }) }}",
+        "options": {}
+      },
+      "id": "generate-task",
+      "name": "Generate Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1540, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const genResult = $input.first().json;\nconst taskId = genResult.tasks[0].id;\n\n// Save taskId to static data so \"check\" can retrieve it later\nconst staticData = $getWorkflowStaticData('global');\nstaticData.lastTaskId = taskId;\n\nreturn [{\n  json: {\n    taskId: taskId,\n    retryCount: 0\n  }\n}];"
+      },
+      "id": "extract-task-id",
+      "name": "Extract Task ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, 300]
+    },
+    {
+      "parameters": {
+        "amount": 15,
+        "unit": "seconds"
+      },
+      "id": "wait",
+      "name": "Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1980, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.API_BASE }}/v1/tasks/{{ $json.taskId }}/proofs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $vars.API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "check-proofs",
+      "name": "Check Proofs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const proofs = $input.first().json;\nconst taskId = $('Wait').first().json.taskId;\nconst retryCount = $('Wait').first().json.retryCount;\n\nconst definitions = proofs.definitions || [];\nconst submissions = proofs.submissions || [];\n\nconst inputTextDef = definitions.find(d => d.type === 'inputText');\n\nlet captchaText = null;\n\nif (inputTextDef) {\n  const submission = submissions.find(s => s.definitionId === inputTextDef.id);\n  if (submission && submission.value) {\n    captchaText = submission.value;\n  }\n}\n\nreturn [{\n  json: {\n    taskId: taskId,\n    retryCount: retryCount,\n    captchaText: captchaText,\n    hasResult: captchaText !== null\n  }\n}];"
+      },
+      "id": "parse-result",
+      "name": "Parse Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2420, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-result",
+              "leftValue": "={{ $json.hasResult }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-result",
+      "name": "Has Result?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2640, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const taskId = $input.first().json.taskId;\nconst captchaText = $input.first().json.captchaText;\n\nreturn [{\n  json: {\n    output: `Captcha solved!\\n\\n**Result:** ${captchaText}\\n**Task ID:** ${taskId}`\n  }\n}];"
+      },
+      "id": "respond-success",
+      "name": "Return Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2880, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const taskId = $input.first().json.taskId;\nconst retryCount = $input.first().json.retryCount + 1;\n\nif (retryCount >= 6) {\n  return [{\n    json: {\n      taskId: taskId,\n      retryCount: retryCount,\n      timedOut: true\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    taskId: taskId,\n    retryCount: retryCount,\n    timedOut: false\n  }\n}];"
+      },
+      "id": "retry-counter",
+      "name": "Retry Counter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2880, 420]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "timed-out",
+              "leftValue": "={{ $json.timedOut }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-timed-out",
+      "name": "Timed Out?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [3100, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "const taskId = $input.first().json.taskId;\n\nreturn [{\n  json: {\n    output: `The captcha hasn't been solved yet.\\n\\n**Task ID:** ${taskId}\\n\\nType **check** to try again.`\n  }\n}];"
+      },
+      "id": "respond-timeout",
+      "name": "Return Timeout",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3340, 340]
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst lastTaskId = staticData.lastTaskId;\n\nif (!lastTaskId) {\n  return [{\n    json: {\n      hasTaskId: false,\n      output: 'No previous captcha task found. Please send an image first.'\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    hasTaskId: true,\n    taskId: lastTaskId\n  }\n}];"
+      },
+      "id": "load-last-task",
+      "name": "Load Last Task ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 520]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-task-id",
+              "leftValue": "={{ $json.hasTaskId }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-task-id",
+      "name": "Has Task ID?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1100, 520]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    output: $input.first().json.output\n  }\n}];"
+      },
+      "id": "respond-no-task",
+      "name": "Return No Task",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 620]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.API_BASE }}/v1/tasks/{{ $json.taskId }}/proofs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $vars.API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "check-proofs-recheck",
+      "name": "Check Proofs Recheck",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 440]
+    },
+    {
+      "parameters": {
+        "jsCode": "const proofs = $input.first().json;\nconst taskId = $('Load Last Task ID').first().json.taskId;\n\nconst definitions = proofs.definitions || [];\nconst submissions = proofs.submissions || [];\n\nconst inputTextDef = definitions.find(d => d.type === 'inputText');\n\nlet captchaText = null;\n\nif (inputTextDef) {\n  const submission = submissions.find(s => s.definitionId === inputTextDef.id);\n  if (submission && submission.value) {\n    captchaText = submission.value;\n  }\n}\n\nif (captchaText) {\n  return [{\n    json: {\n      output: `Captcha solved!\\n\\n**Result:** ${captchaText}\\n**Task ID:** ${taskId}`\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    output: `Still no result yet.\\n\\n**Task ID:** ${taskId}\\n\\nType **check** to try again.`\n  }\n}];"
+      },
+      "id": "parse-recheck-result",
+      "name": "Parse Recheck Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1540, 440]
+    }
+  ],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Route Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Input": {
+      "main": [
+        [
+          {
+            "node": "Has Image?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Image?": {
+      "main": [
+        [
+          {
+            "node": "Convert Image to Base64",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Load Last Task ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert Image to Base64": {
+      "main": [
+        [
+          {
+            "node": "Get Campaign Template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Campaign Template": {
+      "main": [
+        [
+          {
+            "node": "Extract Proof ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Proof ID": {
+      "main": [
+        [
+          {
+            "node": "Generate Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Task": {
+      "main": [
+        [
+          {
+            "node": "Extract Task ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Task ID": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Check Proofs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Proofs": {
+      "main": [
+        [
+          {
+            "node": "Parse Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Result": {
+      "main": [
+        [
+          {
+            "node": "Has Result?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Result?": {
+      "main": [
+        [
+          {
+            "node": "Return Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retry Counter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry Counter": {
+      "main": [
+        [
+          {
+            "node": "Timed Out?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Timed Out?": {
+      "main": [
+        [
+          {
+            "node": "Return Timeout",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Last Task ID": {
+      "main": [
+        [
+          {
+            "node": "Has Task ID?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Task ID?": {
+      "main": [
+        [
+          {
+            "node": "Check Proofs Recheck",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return No Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Proofs Recheck": {
+      "main": [
+        [
+          {
+            "node": "Parse Recheck Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "pinData": {}
+}
