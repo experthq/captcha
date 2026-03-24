@@ -45,7 +45,6 @@ export default function CheckPage({
         throw new Error(err.message || err.error || "Failed to fetch proofs");
       }
       const data = await res.json();
-      console.log("Proofs:", data);
       setDefinitions(data.definitions ?? []);
       setSubmissions(data.submissions ?? []);
       setLastChecked(new Date().toLocaleTimeString());
@@ -69,11 +68,11 @@ export default function CheckPage({
   });
   const [pollCount, setPollCount] = useState(0);
   useEffect(() => {
-    if (hasResult || pollCount >= 6) return;
+    if (hasResult || pollCount >= 3) return;
     const interval = setInterval(() => {
       setPollCount((c) => c + 1);
       fetchProofs();
-    }, 10000);
+    }, 30000);
     return () => clearInterval(interval);
   }, [fetchProofs, hasResult, pollCount]);
 
@@ -100,7 +99,10 @@ export default function CheckPage({
 
   // Find the showImage definition and inputText submission
   const imageDef = definitions.find((d) => d.type === "showImage");
-  const imageSrc = imageDef?.image || imageDef?.value;
+  const rawImgSrc = imageDef?.image || imageDef?.value;
+  const imageSrc = rawImgSrc && !rawImgSrc.startsWith("data:") && !rawImgSrc.startsWith("http")
+    ? `data:image/jpeg;base64,${rawImgSrc}`
+    : rawImgSrc;
   const textSubmission = submissions.find((s) => {
     const def = definitions.find((d) => d.id === s.definitionId);
     return def?.type === "inputText";
@@ -218,7 +220,7 @@ export default function CheckPage({
           <div className="flex flex-col gap-2">
             <button
               className="flex h-12 items-center justify-center gap-2 rounded-full bg-foreground px-6 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] disabled:opacity-50 disabled:cursor-not-allowed"
-              onClick={fetchProofs}
+              onClick={() => fetchProofs()}
               disabled={loading || cooldown > 0}
             >
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
