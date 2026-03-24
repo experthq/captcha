@@ -17,7 +17,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const item = $input.first();\nconst binaryKeys = Object.keys(item.binary || {});\nconst hasImage = binaryKeys.length > 0;\n\nreturn [{\n  json: {\n    hasImage: hasImage,\n    chatInput: item.json.chatInput || ''\n  }\n}];"
+        "jsCode": "const item = $input.first();\nconst binaryKeys = Object.keys(item.binary || {});\nconst hasImage = binaryKeys.length > 0;\n\nreturn [{\n  json: {\n    hasImage: hasImage,\n    chatInput: item.json.chatInput || ''\n  },\n  binary: item.binary\n}];"
       },
       "id": "route-input",
       "name": "Route Input",
@@ -56,7 +56,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const items = $('Chat Trigger').all();\nconst item = items[0];\n\nconst binaryKeys = Object.keys(item.binary || {});\nconst binaryData = item.binary[binaryKeys[0]];\nconst mimeType = binaryData.mimeType || 'image/png';\n\nconst buffer = await this.helpers.getBinaryDataBuffer(0, binaryKeys[0]);\nconst base64 = buffer.toString('base64');\n\nreturn [{\n  json: {\n    imageBase64: `data:${mimeType};base64,${base64}`\n  }\n}];"
+        "jsCode": "const item = $input.first();\n\nconst binaryKeys = Object.keys(item.binary || {});\nif (binaryKeys.length === 0) {\n  throw new Error('No image attached. Please upload an image.');\n}\n\nconst binaryKey = binaryKeys[0];\nconst binaryData = item.binary[binaryKey];\nconst mimeType = binaryData.mimeType || 'image/png';\n\nlet base64 = binaryData.data;\nif (!base64 || base64 === 'filesystem-v2') {\n  const buffer = await this.helpers.getBinaryDataBuffer(0, binaryKey);\n  base64 = buffer.toString('base64');\n}\n\nreturn [{\n  json: {\n    imageBase64: `data:${mimeType};base64,${base64}`\n  }\n}];"
       },
       "id": "convert-to-base64",
       "name": "Convert Image to Base64",

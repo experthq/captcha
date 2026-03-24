@@ -107,6 +107,11 @@ export default function CheckPage({
     const def = definitions.find((d) => d.id === s.definitionId);
     return def?.type === "inputText";
   });
+  console.log("++++++++++++++++++++++++++");
+  console.log("imageDef:", imageDef);
+  console.log("rawImgSrc:", rawImgSrc);
+  console.log("imageSrc:", imageSrc);
+  
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
@@ -180,8 +185,10 @@ export default function CheckPage({
             ))}
           </div>
         )}
+        
 
         {/* Image + Result side by side */}
+
         {(imageSrc || textSubmission) && (
           <div className="flex flex-col gap-6 w-full">
             {imageSrc && (
